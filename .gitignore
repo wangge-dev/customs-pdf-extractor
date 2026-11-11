@@ -1,0 +1,39 @@
+# Python environments and build products
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+portable_build/
+builddeps/
+ocr_deps/
+
+# Independently supplied models and runtimes
+ocr_models/
+runtime/
+*.onnx
+*.dll
+*.exe
+
+# Private inputs, results and review images
+*.pdf
+*.xlsx
+*.xls
+*.csv
+*.tsv
+*.jsonl
+*.png
+*.jpg
+*.jpeg
+*.log
+*.html
+报关单提取_*/
+提取核对报告*
+逐字段原图核对*
+本次运行结果.txt
+*audit*.json
+ocr*.json
+new[0-9]*.json
+old[0-9]*.json
+crop_*.png
