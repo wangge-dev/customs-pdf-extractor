@@ -1,4 +1,4 @@
-"""本地报关单批量提取程序的 Windows 图形界面。"""
+"""离线 PDF 批处理与报关单提取的 Windows 图形界面。"""
 
 from __future__ import annotations
 
@@ -10,17 +10,16 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-import backend
-
-
 class Application(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("报关单 PDF 批量提取")
-        self.geometry("760x535")
-        self.minsize(650, 460)
+        self.title("本地 PDF 批处理与核对")
+        self.geometry("860x620")
+        self.minsize(760, 540)
         self.input_path = tk.StringVar()
         self.output_path = tk.StringVar()
+        self.mode = tk.StringVar(value="报关单提取")
+        self.rules_path = tk.StringVar()
         self.status = tk.StringVar(value="请选择 PDF 文件夹和结果保存位置。")
         self.events = queue.Queue()
         self.running = False
@@ -34,9 +33,9 @@ class Application(tk.Tk):
         outer = ttk.Frame(self, padding=18)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(1, weight=1)
-        outer.rowconfigure(5, weight=1)
+        outer.rowconfigure(7, weight=1)
 
-        ttk.Label(outer, text="报关单 PDF 批量提取", font=("Microsoft YaHei UI", 16, "bold")).grid(
+        ttk.Label(outer, text="本地 PDF 批处理与核对", font=("Microsoft YaHei UI", 16, "bold")).grid(
             row=0, column=0, columnspan=3, sticky="w", pady=(0, 14)
         )
         ttk.Label(outer, text="PDF 文件夹").grid(row=1, column=0, sticky="w", pady=5)
@@ -50,8 +49,19 @@ class Application(tk.Tk):
         self.output_button = ttk.Button(outer, text="选择文件夹", command=self._choose_output)
         self.output_button.grid(row=2, column=2, pady=5)
 
+        ttk.Label(outer, text="处理模式").grid(row=3, column=0, sticky="w", pady=5)
+        self.mode_box = ttk.Combobox(outer, textvariable=self.mode, state="readonly", values=(
+            "报关单提取", "PDF 体检及文本导出", "PDF 表格提取", "自定义字段提取"))
+        self.mode_box.grid(row=3, column=1, sticky="ew", padx=8, pady=5)
+        self.mode_box.bind("<<ComboboxSelected>>", self._mode_changed)
+        ttk.Label(outer, text="字段规则").grid(row=4, column=0, sticky="w", pady=5)
+        self.rules_entry = ttk.Entry(outer, textvariable=self.rules_path, state="disabled")
+        self.rules_entry.grid(row=4, column=1, sticky="ew", padx=8, pady=5)
+        self.rules_button = ttk.Button(outer, text="选择 JSON", command=self._choose_rules, state="disabled")
+        self.rules_button.grid(row=4, column=2, pady=5)
+
         buttons = ttk.Frame(outer)
-        buttons.grid(row=3, column=0, columnspan=3, sticky="w", pady=(12, 8))
+        buttons.grid(row=5, column=0, columnspan=3, sticky="w", pady=(12, 8))
         self.start_button = ttk.Button(buttons, text="开始提取", command=self._start)
         self.start_button.pack(side="left", padx=(0, 10))
         self.open_button = ttk.Button(buttons, text="打开结果文件夹", command=self._open_output)
@@ -59,13 +69,15 @@ class Application(tk.Tk):
         self.report_button = ttk.Button(buttons, text="打开核对报告", command=self._open_report, state="disabled")
         self.report_button.pack(side="left", padx=(0, 10))
         self.images_button = ttk.Button(buttons, text="打开原图核对", command=self._open_images, state="disabled")
-        self.images_button.pack(side="left")
+        self.images_button.pack(side="left", padx=(0, 10))
+        self.primary_button = ttk.Button(buttons, text="打开通用结果表", command=self._open_primary, state="disabled")
+        self.primary_button.pack(side="left")
         ttk.Label(outer, textvariable=self.status, wraplength=700).grid(
-            row=4, column=0, columnspan=3, sticky="w", pady=(2, 6)
+            row=6, column=0, columnspan=3, sticky="w", pady=(2, 6)
         )
 
         log_frame = ttk.Frame(outer)
-        log_frame.grid(row=5, column=0, columnspan=3, sticky="nsew")
+        log_frame.grid(row=7, column=0, columnspan=3, sticky="nsew")
         log_frame.rowconfigure(0, weight=1)
         log_frame.columnconfigure(0, weight=1)
         self.log = tk.Text(log_frame, height=12, state="disabled", wrap="word", font=("Microsoft YaHei UI", 9))
@@ -73,9 +85,20 @@ class Application(tk.Tk):
         scrollbar = ttk.Scrollbar(log_frame, command=self.log.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.log.configure(yscrollcommand=scrollbar.set)
-        ttk.Label(outer, text="适用于同类有文字层报关单；扫描件或版式异常须核对原图。", foreground="#555555").grid(
-            row=6, column=0, columnspan=3, sticky="w", pady=(8, 0)
+        ttk.Label(outer, text="通用功能基于 PDF 文字层；无文字层页面不会自动 OCR，提取结果须核对原件。", foreground="#555555").grid(
+            row=8, column=0, columnspan=3, sticky="w", pady=(8, 0)
         )
+
+    def _mode_changed(self, _event=None):
+        state = "normal" if not self.running and self.mode.get() == "自定义字段提取" else "disabled"
+        self.rules_entry.configure(state=state)
+        self.rules_button.configure(state=state)
+
+    def _choose_rules(self):
+        selected = filedialog.askopenfilename(title="选择字段规则 JSON", parent=self,
+                                              filetypes=[("JSON 文件", "*.json")])
+        if selected:
+            self.rules_path.set(selected)
 
     def _choose_input(self):
         selected = filedialog.askdirectory(title="选择存放 PDF 的文件夹", parent=self)
@@ -97,6 +120,8 @@ class Application(tk.Tk):
         self.running = busy
         for widget in (self.input_entry, self.output_entry, self.input_button, self.output_button, self.start_button):
             widget.configure(state="disabled" if busy else "normal")
+        self.mode_box.configure(state="disabled" if busy else "readonly")
+        self._mode_changed()
 
     def _start(self):
         input_dir = self.input_path.get().strip().strip('"')
@@ -106,6 +131,11 @@ class Application(tk.Tk):
             return
         if not output_dir or not Path(output_dir).is_dir():
             messagebox.showwarning("请选择文件夹", "请选择存在的结果保存文件夹。", parent=self)
+            return
+        mode = self.mode.get()
+        rules_path = self.rules_path.get().strip().strip('"')
+        if mode == "自定义字段提取" and not Path(rules_path).is_file():
+            messagebox.showwarning("请选择规则", "请选择存在的 JSON 字段规则文件。", parent=self)
             return
         self._set_busy(True)
         self.last_result_dir = None
@@ -117,7 +147,9 @@ class Application(tk.Tk):
 
         def run():
             try:
-                result = backend.run_batch(input_dir, output_dir, lambda message: self.events.put(("progress", str(message))))
+                from general_backend import run_mode
+                result = run_mode(mode, input_dir, output_dir, rules_path,
+                                  lambda message: self.events.put(("progress", str(message))))
                 self.events.put(("done", result))
             except Exception as exc:
                 self.events.put(("error", (str(exc) or type(exc).__name__, traceback.format_exc())))
@@ -133,7 +165,7 @@ class Application(tk.Tk):
                     self._append_log(value)
                 elif kind == "done":
                     self._set_busy(False)
-                    self._append_log("处理结束，请查看结果和核对报告。")
+                    self._append_log("处理结束，请查看结果和异常提示。")
                     if isinstance(value, dict):
                         self.last_result = value
                         self.last_result_dir = value.get('结果文件夹')
@@ -143,7 +175,7 @@ class Application(tk.Tk):
                     self._update_result_buttons()
                     summary = self._result_summary(self.last_result)
                     self.status.set(summary)
-                    messagebox.showinfo("处理结束", summary + "\n请打开核对报告，查看待核对项目。", parent=self)
+                    messagebox.showinfo("处理结束", summary + "\n请查看结果中的异常提示，并核对原文件。", parent=self)
                 elif kind == "error":
                     self._set_busy(False)
                     self.status.set("处理失败，请查看下方信息。")
@@ -158,12 +190,13 @@ class Application(tk.Tk):
     def _result_summary(result):
         keys = ("PDF总数", "商品明细行数", "待核对文件数", "OCR未完成文件数")
         if not all(key in result for key in keys):
-            return "处理结束，请查看结果和核对报告。"
+            return "处理结束，请查看结果和异常提示。"
         return (f"处理结束：{result['PDF总数']} 份 PDF，{result['商品明细行数']} 条商品明细；"
                 f"{result['待核对文件数']} 份待核对，{result['OCR未完成文件数']} 份 OCR 未完成。")
 
     def _update_result_buttons(self):
-        for widget, key in ((self.report_button, '核对报告'), (self.images_button, '原图核对页')):
+        for widget, key in ((self.report_button, '核对报告'), (self.images_button, '原图核对页'),
+                            (self.primary_button, '主要结果')):
             widget.configure(state="normal" if self.last_result.get(key) else "disabled")
 
     def _open_result_file(self, key):
@@ -181,6 +214,9 @@ class Application(tk.Tk):
 
     def _open_images(self):
         self._open_result_file('原图核对页')
+
+    def _open_primary(self):
+        self._open_result_file('主要结果')
 
     def _open_output(self):
         path = self.last_result_dir or self.output_path.get().strip().strip('"')

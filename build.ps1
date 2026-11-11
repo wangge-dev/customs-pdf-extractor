@@ -46,7 +46,7 @@ try {
     $env:PYTHONPATH = $modulePaths -join ';'
     $argsList = @(
         '-m', 'PyInstaller', '--noconfirm', '--onedir', '--windowed',
-        '--name', '报关单PDF批量提取',
+        '--name', '本地PDF批处理',
         '--distpath', (Join-Path $buildRoot 'dist'),
         '--workpath', (Join-Path $buildRoot 'build'),
         '--specpath', $buildRoot,
@@ -66,7 +66,9 @@ try {
     $argsList += $Entry
     & $Python @argsList
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
-    $appDir = Join-Path (Join-Path $buildRoot 'dist') '报关单PDF批量提取'
+    $appDir = Join-Path (Join-Path $buildRoot 'dist') '本地PDF批处理'
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '示例字段模板.json') -Destination $appDir
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '使用说明.txt') -Destination $appDir
     Write-Host "Build complete: $appDir"
     Write-Host 'Copy the entire application folder when sharing. Verify it on another Windows machine with a real PDF.'
 }
