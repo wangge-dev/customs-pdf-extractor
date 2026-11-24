@@ -2,6 +2,8 @@
 
 面向日常文档整理的离线工具：批量检查 PDF、按页导出文本、提取表格和自定义字段，并保留来源页码与异常信息。另提供针对已适配版式的中国海关出口报关单提取与原图核对。准备好依赖后，处理在本机完成，不需要 Codex。
 
+新增扫描件识别：可从每页图像提取文字，也可尝试还原有线表格。当前扫描识别入口为命令行；图形界面仍提供原有模式。
+
 ## 功能
 
 ### 通用 PDF
@@ -9,9 +11,13 @@
 - **文件体检与逐页文本**：递归列出文件、页数、页面尺寸、可提取文字量，以及无文字层、密码保护或读取失败的情况；逐页导出文本并保留目录结构。
 - **表格提取**：逐页识别表格，导出文件相对路径、页码、表号、行列号及单元格文字，提供页面和文件状态供复查。
 - **自定义字段**：用 JSON 定义字段和正则表达式，将匹配结果、页码、附近原文及异常导出 Excel；适合对文字层有稳定标识的不同单据试用。
+- **扫描件文字识别**：识别 PDF 每页的图像，导出逐页文本和 Excel。结果保留页码、文字位置、识别分数和模型名称。
+- **扫描件表格识别**：检测图片中的表格线，将识别出的文字按位置分配到单元格。仅有横线时会尝试根据文字位置推测列，并标记核对。结果保留页码、行列、位置及未分配文字。
 - 同名文件以相对路径区分，结果放在新建文件夹，不覆盖之前的批次；文字作为 Excel 文本保存，避免把内容当作公式执行。
 
-通用模式直接读取 PDF 文字层，**不对扫描件自动 OCR**。无文字层可能是扫描页、空白页或文字无法提取；体检提示不能判定具体原因。表格、字段规则可能漏项或误匹配，请按文件、页码和原文核对。
+体检、普通表格和自定义字段模式直接读取 PDF 文字层；它们不会自动识别图片。无文字层可能是扫描页、空白页或文字无法提取。扫描识别模式需要单独运行，会对每页图像识别，包括已有文字层的页面。
+
+扫描表格优先处理有线网格。仅横线表格的列来自推测，空白整行可能导致表格被拆开。同页已有完整线框时，不会另外搜索仅横线表格。无框表格、合并单元格、断线、倾斜和印章遮挡可能导致错提或漏提；没有检出表格会在结果中提示。所有扫描识别结果都要对照原 PDF 核对。识别分数只供排查参考，不是准确率。
 
 体检会对单张图片占页较大、可提取文字很少的页面提示“疑似图片主体”。这只是辅助筛查，图片分块、图层或少量文字等情况可能漏报或误报；有文字层也不代表正文可提取。
 
@@ -56,7 +62,15 @@ curl.exe -L --fail --output ocr_models/PP-OCRv6_rec_medium.onnx "https://www.mod
 .\.venv\Scripts\python.exe main.py --inventory "PDF文件夹路径" "结果保存文件夹路径"
 .\.venv\Scripts\python.exe main.py --tables "PDF文件夹路径" "结果保存文件夹路径"
 .\.venv\Scripts\python.exe main.py --fields "PDF文件夹路径" "结果保存文件夹路径" "字段规则.json"
+.\.venv\Scripts\python.exe main.py --scan-text "PDF文件夹路径" "结果保存文件夹路径"
+.\.venv\Scripts\python.exe main.py --scan-tables "PDF文件夹路径" "结果保存文件夹路径"
 ```
+
+`--scan-text` 输出逐页文本、文字位置和页面状态。`--scan-tables` 输出单元格明细、页面状态和未分配文字。结果保存目录不能在输入目录里面。每次运行都会创建新文件夹。
+
+扫描识别使用本地 RapidOCR 的 PP-OCRv6 检测模型和 medium 文字识别模型。检测模型来自安装的 `rapidocr` 包；识别模型按上面的命令准备。模型缺失时程序会报错，不会在运行时自动下载。默认每页按 200 DPI 渲染；超过 2,000 万像素会降分辨率并在结果中提示。程序没有开启方向分类，旋转、歪斜或复杂排版需要特别核对。
+
+我用两套文字识别模型比较了 3 页样本。[测试方法和结果](benchmarks/扫描识别对比.md)记录了差扫描漏字情况；这不是整页准确率，也不代表表格位置正确。[表格结构对比](benchmarks/表格识别对比.md)说明了整页处理和人工裁剪的差别。
 
 本机需要兼容的 Microsoft Visual C++ 运行库；如 ONNX Runtime 导入时遇到 DLL 错误，请按 [Microsoft 文档](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)安装相应的受支持运行库。
 
@@ -84,6 +98,6 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1 -Python .\.venv\Scripts\pyt
 
 ## English
 
-This Windows-oriented, offline toolkit inventories PDFs, exports page text, extracts tables and configurable regex fields, and reports provenance and exceptions. These general modes require an extractable text layer and do not OCR image-only scans. A separate customs mode extracts fields from supported Chinese customs declarations and provides field-image review. OCR reads image crops located using the PDF text layer; matching readings do not prove correctness. Scans, obscured values, and unfamiliar layouts require review against the original.
+This Windows-oriented, offline toolkit inventories PDFs, extracts text-layer tables and configurable fields, and reports provenance and exceptions. Separate command-line modes OCR image-based PDF pages and attempt to reconstruct ruled tables. OCR and table results require review against the source; borderless or merged tables, rotation, and image degradation can cause omissions. The GUI currently exposes the existing text-layer and customs modes. The customs mode provides field-image review; matching readings do not prove correctness.
 
 For source setup, use the PowerShell commands above. The RapidOCR ONNX model is downloaded separately and is not included in this repository. Third-party packages, model files, and Microsoft runtimes have separate licenses; verify applicable terms before redistribution. Never upload real customs documents, outputs, logs, or identifiable screenshots; use synthetic fixtures.

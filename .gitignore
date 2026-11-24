@@ -17,6 +17,7 @@ runtime/
 *.exe
 
 # Private inputs, results and review images
+benchmarks/ocr_benchmark_public/
 *.pdf
 *.xlsx
 *.xls

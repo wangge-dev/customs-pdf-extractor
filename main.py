@@ -17,14 +17,15 @@ if __name__ == '__main__':
         run_batch(sys.argv[2], sys.argv[3],
                   progress_callback=lambda message: print(message, flush=True),
                   workers=int(sys.argv[4]) if len(sys.argv) == 5 else None)
-    elif len(sys.argv) > 1 and sys.argv[1] in ('--inventory', '--tables', '--fields'):
+    elif len(sys.argv) > 1 and sys.argv[1] in ('--inventory', '--tables', '--fields', '--scan-text', '--scan-tables'):
         from general_backend import run_mode
         command = sys.argv[1]
         if len(sys.argv) != (5 if command == '--fields' else 4):
-            raise SystemExit('用法：main.py --inventory|--tables 输入文件夹 输出文件夹；'
+            raise SystemExit('用法：main.py --inventory|--tables|--scan-text|--scan-tables 输入文件夹 输出文件夹；'
                              '--fields 输入文件夹 输出文件夹 规则.json')
         mode = {'--inventory': 'PDF 体检及文本导出', '--tables': 'PDF 表格提取',
-                '--fields': '自定义字段提取'}[command]
+                '--fields': '自定义字段提取', '--scan-text': '扫描件文字识别',
+                '--scan-tables': '扫描件表格识别'}[command]
         result = run_mode(mode, sys.argv[2], sys.argv[3], sys.argv[4] if command == '--fields' else '',
                           progress=lambda message: print(message, flush=True))
         for key, value in result.items():

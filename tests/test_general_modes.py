@@ -14,6 +14,32 @@ from test_pdf_tables import _pdf, GRID
 
 
 class GeneralModesTest(unittest.TestCase):
+    def test_scan_modes_forward_result_and_progress(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, output = root / 'source', root / 'output'
+            source.mkdir()
+            output.mkdir()
+            progress = []
+            text_result = {'result_dir': output, 'workbook': output / 'text.xlsx',
+                           'text_dir': output / 'text', 'pdf_count': 2,
+                           'page_count': 3, 'ocr_count': 2, 'issue_count': 1}
+            with patch('scan_ocr.run_scan_ocr', return_value=text_result) as run:
+                info = run_mode('扫描件文字识别', source, output, progress=progress.append)
+            self.assertEqual(info['完成识别页数'], 2)
+            self.assertEqual(info['异常提示数'], 1)
+            self.assertIn('核对原件', info['核对说明'])
+            self.assertTrue(callable(run.call_args.kwargs['progress_callback']))
+            table_result = {'output_dir': output, 'workbook': output / 'table.xlsx',
+                            'pdf_count': 2, 'page_count': 3, 'table_count': 1,
+                            'cell_count': 6, 'warning_count': 2}
+            with patch('scan_tables.run_scan_tables', return_value=table_result) as run:
+                info = run_mode('扫描件表格识别', source, output, progress=progress.append)
+            self.assertEqual(info['单元格数'], 6)
+            self.assertEqual(info['异常提示数'], 2)
+            self.assertIn('核对原件', info['核对说明'])
+            self.assertTrue(callable(run.call_args.kwargs['progress']))
+
     def test_failed_text_export_is_in_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

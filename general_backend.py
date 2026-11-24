@@ -53,4 +53,20 @@ def run_mode(mode, input_dir, output_dir, rules_path='', progress=None):
         return {'结果文件夹': str(result['output_dir']), '主要结果': str(result['workbook']),
                 'PDF总数': result['pdf_count'], '匹配数': result['match_count'],
                 '异常提示数': result['warning_count']}
+
+    if mode == '扫描件文字识别':
+        from scan_ocr import run_scan_ocr
+        result = run_scan_ocr(source, destination, progress_callback=progress)
+        return {'结果文件夹': str(result['result_dir']), '主要结果': str(result['workbook']),
+                '文本目录': str(result['text_dir']), 'PDF总数': result['pdf_count'],
+                '总页数': result['page_count'], '完成识别页数': result['ocr_count'],
+                '异常提示数': result['issue_count'], '核对说明': '所有识别结果均需核对原件'}
+
+    if mode == '扫描件表格识别':
+        from scan_tables import run_scan_tables
+        result = run_scan_tables(source, destination, progress=progress)
+        return {'结果文件夹': str(result['output_dir']), '主要结果': str(result['workbook']),
+                'PDF总数': result['pdf_count'], '总页数': result['page_count'],
+                '表格数': result['table_count'], '单元格数': result['cell_count'],
+                '异常提示数': result['warning_count'], '核对说明': '所有识别结果均需核对原件'}
     raise ValueError(f'未知处理模式：{mode}')
