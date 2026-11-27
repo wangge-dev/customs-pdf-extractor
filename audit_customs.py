@@ -25,68 +25,25 @@ _runtime_path=RESOURCE_ROOT/'runtime'/'msvcp140.dll'
 _msvc=ctypes.WinDLL(str(_runtime_path)) if sys.platform=='win32' and _runtime_path.exists() else None
 import pdfplumber
 from PIL import ImageOps
-from extract_customs import extract_batch, normalized_words, region, detail_region, plain
+from extract_customs import extract_batch, normalized_words, plain, center, HEADER_COLUMNS, DETAIL_COLUMNS
 
-HEADER_LOCATIONS=[
- ('境内发货人','境内发货人',37,255),('境内发货人18位代码','境内发货人',37,255),
- ('境外收货人','境外收货人',37,255),('生产销售单位','生产销售单位',37,255),
- ('生产销售单位18位代码','生产销售单位',37,255),('合同协议号','合同协议号',37,255),
- ('提运单号','提运单号',516,805),('贸易国','贸易国',255,383),
- ('运抵国','运抵国',383,516),('离境口岸','离境口岸',637,805),
- ('件数','件数',255,301),('毛重(千克)','毛重',301,383),('净重(千克)','净重',383,464)]
-DETAIL_LOCATIONS=[('项号',37,58,0),('商品编号',58,108,0),('商品名称',104,334,0),
- ('数量',334,421,22),('总价',421,504,11),('原产国',504,568,0),
- ('最终目的国',568,660,0),('境内货源地',660,763,0)]
-
-def field_specs(pdf,data):
-    specs=[]
-    for pn,page in enumerate(pdf.pages,1):
-        words=normalized_words(page)
-        if pn==1:
-            for field,label,left,right in HEADER_LOCATIONS:
-                anchors=[w for w in words if w['text'].startswith(label) and left<=w['x0']<right]
-                if len(anchors)!=1:
-                    specs.append(dict(page=pn,item=None,field=field,value=data['headers'][0][field],bbox=None))
-                    continue
-                y=anchors[0]['top']
-                code=field.endswith('18位代码')
-                selected=region(words,left,right,y-2 if code else y+5,y+5 if code else y+20)
-                if code:
-                    # Crop just the original code's position, but do not pass its value to OCR.
-                    hits=page.search(r'(?<![A-Z0-9])[A-Z0-9]{18}(?![A-Z0-9])') or []
-                    hits=[h for h in hits if abs(h['top']*842/page.width-y)<4]
-                    if len(hits)==1:
-                        h=hits[0]; scale=842/page.width
-                        selected=[dict(x0=h['x0']*scale,x1=h['x1']*scale,top=h['top']*scale,bottom=h['bottom']*scale)]
-                bbox=bounds(selected) if selected else None
-                specs.append(dict(page=pn,item=None,field=field,value=data['headers'][0][field],bbox=bbox))
-        # Additional documents can contain the same numbers as declaration
-        # item numbers. Only audit rows the extractor found on this exact page.
-        heads=[w for w in words if w['text']=='项号']
-        if len(heads)!=1:
-            continue
-        starts=[w for w in words if 35<=w['x0']<58 and w['top']>heads[0]['top'] and re.fullmatch(r'\d+',w['text'])]
-        rows={r['项号']:r for r,e in zip(data['details'],data['evidence']) if e['页码']==pn}
-        for start in sorted(starts,key=lambda w:w['top']):
-            item=int(start['text'])
-            if item not in rows: continue
-            for field,left,right,offset in DETAIL_LOCATIONS:
-                y=start['top']+offset
-                selected=detail_region(words,field,left,right,y-3,y+3)
-                # A missing value keeps its expected slot visible in the report.
-                bbox=bounds(selected) if selected else (left,y-1,right,y+10)
-                specs.append(dict(page=pn,item=item,field=field,value=rows[item][field],bbox=bbox))
+def field_specs(pdf, data):
+    header = data['headers'][0]
+    boxes = data.get('header_boxes', {}).get(header['文件名'], {})
+    specs = [dict(page=1,item=None,position=None,field=field,value=header[field],bbox=boxes.get(field))
+             for field in HEADER_COLUMNS[1:]]
+    for row, source in zip(data['details'],data['evidence'],strict=True):
+        for field in DETAIL_COLUMNS[1:]:
+            specs.append(dict(page=source['页码'],item=row['项号'],position=source['行位置'],
+                              field=field,value=row[field],bbox=source['字段位置'].get(field)))
     return specs
-
-def bounds(words):
-    return (min(w['x0'] for w in words)-1,min(w['top'] for w in words)-1,
-            max(w['x1'] for w in words)+1,max(w['bottom'] for w in words)+1)
 
 def normalize(field,value):
     if value is None: return None
     text=unicodedata.normalize('NFKC',str(value))
     text=re.sub(r'\s+','',text)
-    if field in ('总价','件数','项号','毛重(千克)','净重(千克)'):
+    if field=='项号': return text if re.fullmatch(r'[0-9]{1,4}',text) else None
+    if field in ('总价','件数','毛重(千克)','净重(千克)'):
         try: return Decimal(text.replace(',',''))
         except InvalidOperation: return None
     if field in ('原产国','最终目的国','境内货源地','贸易国','运抵国','离境口岸'):
@@ -110,31 +67,32 @@ def consistency_checks(pdf,data):
     rules=[]
     def add(name,observed,expected,ok,remark='',page=None,item=None):
         rules.append(dict(检查项=name,页码=page,项号=item,实际结果=str(observed),参考值=str(expected),状态='相符' if ok else '待核对',说明=remark))
-    page_marks=[]
-    declaration_pages=[]
-    for pn,p in enumerate(pdf.pages,1):
-        if len([w for w in normalized_words(p) if w['text']=='项号']) == 1:
-            declaration_pages.append((pn,p))
-            match=re.search(r'页码/页数\s*[:：]\s*(\d+)\s*/\s*(\d+)',p.extract_text() or '')
-            page_marks.append(tuple(map(int,match.groups())) if match else None)
+    pages=data['page_info']
+    page_marks=[p['印刷页码'] for p in pages]
     total=page_marks[0][1] if page_marks and page_marks[0] else 0
-    add('报关单页码完整性',page_marks,f'1/{total} 至 {total}/{total}' if total else '可识别的报关单页码',
-        total>0 and page_marks==[(i,total) for i in range(1,total+1)],
-        '仅检查识别出商品表头的报关单页面；其他页面另列未提取页面提示')
+    observed=[p['页码'] for p in pages]
+    complete = bool(total and observed==list(range(1,total+1)) and
+                    all(not mark or tuple(mark)==(p['页码'],total) for p,mark in zip(pages,page_marks)))
+    add('报关单页码完整性',page_marks,f'1 至 {total} 页',complete,
+        '结合印刷页码和已定位明细页；原件缺少页码标识的页面另行提示')
+    for p,mark in zip(pages,page_marks):
+        if not mark:
+            add('本页未标示印刷页码',p['页码'],'请核对原件顺序',False,page=p['页码'])
     items=[r['项号'] for r in data['details']]
-    add('项号连续且不重复',items,f'1 至 {len(items)}',items==list(range(1,len(items)+1)))
+    add('项号连续且不重复',items,f'1 至 {len(items)}',bool(items) and items==list(range(1,len(items)+1)))
     codes=0
-    for pn,p in declaration_pages:
-        words=normalized_words(p)
-        y=next(w['top'] for w in words if w['text']=='项号')
-        codes+=sum(bool(re.fullmatch(r'\d{10}',w['text'])) and 58<=w['x0']<108 and w['top']>y for w in words)
-    add('商品编码数量与提取行数',len(items),codes,len(items)==codes,'另一种文字层计数，只作漏项提示，不能替代图像核对')
+    for entry in pages:
+        left,right=entry['编码范围']
+        codes+=sum(bool(re.fullmatch(r'\d{10}',w['text'])) and left<=center(w)<right
+                   and entry['表起点']<w['top']<entry['表终点']
+                   for w in normalized_words(pdf.pages[entry['页码']-1]))
+    add('商品编码数量与提取行数',len(items),codes,len(items)==codes and bool(items),
+        '从已定位的页面另数十位编码；未确认的页单列，不计为完成')
     header=data['headers'][0]
     gross,net=header['毛重(千克)'],header['净重(千克)']
     add('毛重不小于净重',gross,net,gross is not None and net is not None and gross>=net)
     weights=[]
-    for e in data['evidence']:
-        row=next(r for r in data['details'] if r['项号']==e['项号'])
+    for row,e in zip(data['details'],data['evidence'],strict=True):
         raw=e['原文']
         quantity=re.fullmatch(r'(\d+(?:\.\d+)?)(.+)',row['数量'] or '')
         price=(raw.get('总价') or [''])[0].replace(' ','')
@@ -185,6 +143,7 @@ def audit(source,model,output=None,engine=None,relative_name=None):
     started=time.perf_counter()
     with pdfplumber.open(source) as pdf:
         specs=field_specs(pdf,data)
+        invalid_items={(i['页码'],i['项号']) for i in data['issues'] if i['字段']=='项号列异常'}
         pages={pn:page.to_image(resolution=300).original.convert('RGB') for pn,page in enumerate(pdf.pages,1)}
         for n,spec in enumerate(specs,1):
             bbox=spec['bbox']; raw=''; score=None; image64=''; error=''
@@ -202,8 +161,10 @@ def audit(source,model,output=None,engine=None,relative_name=None):
                 except Exception as exc:
                     error=f'{type(exc).__name__}: {exc}'
             status,reason=compare(spec['field'],spec['value'],raw,score)
+            if spec['field']=='项号' and (spec['page'],spec['item']) in invalid_items:
+                status,reason='待核对','项号列异常，请对照该物理页的原始行'
             if error: reason='OCR 执行失败：'+error
-            records.append(dict(核对编号=n,文件名=source.name,页码=spec['page'],项号=spec['item'],字段=spec['field'],提取值=spec['value'],OCR读数=raw,OCR分数=score,核对状态=status,原因=reason,人工确认值=None,复核意见=None,截图=image64))
+            records.append(dict(核对编号=n,文件名=source.name,页码=spec['page'],项号=spec['item'],行位置=spec['position'],字段=spec['field'],提取值=spec['value'],OCR读数=raw,OCR分数=score,核对状态=status,原因=reason,人工确认值=None,复核意见=None,截图=image64))
             if n%20==0 or n==len(specs): print(f'{model}: {n}/{len(specs)}',flush=True)
         rules=consistency_checks(pdf,data)
     filename=relative_name or source.name

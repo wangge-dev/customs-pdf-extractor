@@ -4,6 +4,14 @@
 
 新增扫描件识别：可从每页图像提取文字，也可尝试还原有线表格。当前扫描识别入口为命令行；图形界面仍提供原有模式。
 
+## Windows 下载
+
+从 [GitHub Releases](https://github.com/wangge-dev/customs-pdf-extractor/releases/latest) 下载 Windows 启动包，完整解压到本地文件夹。
+
+1. 准备 64 位 Python 3.12（含 Python Launcher 和 Tk）及微软 Visual C++ x64 运行库。[Python 下载](https://www.python.org/downloads/windows/) · [微软运行库下载](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)
+2. 首次双击 `Setup-Windows.cmd`。它会在解压目录内安装依赖、从上游下载识别模型并试运行 OCR。网络中断后可重新运行。
+3. 双击 `Start-Windows.cmd` 打开工具。之后可离线处理。命令行也可以通过同一入口运行，例如 `Start-Windows.cmd --scan-tables "D:\PDF" "D:\结果"`。结果文件夹须已存在。
+
 ## 功能
 
 ### 通用 PDF
@@ -26,6 +34,8 @@
 ### 报关单专用模式
 
 - 批量读取文件夹及子文件夹中的 PDF，支持多页；每次运行创建新的结果文件夹。
+- 按字段标签和表格位置取值。对缺少列名的续页，结合单据页数、前后项号、十位商品编码和价格列的位置识别。证据不足时，文件总览列出未确认的页码及已导出项数。
+- 每条商品明细保留所在 PDF、物理页和行位置。项号重复时，核对报告仍可定位到各自的原图。
 - 提取文件名、商品编号、商品名称、数量、总价、原产国、最终目的国、境内货源地，以及发收货人、合同号、重量等表头字段。
 - PDF 文字与字段截图 OCR 读数对照，并列出未读出、低分、读数不同和规则异常；可在离线页面查看字段原图。
 - 核对页面支持按文件名、内容、字段和状态筛选；处理完成后可从主界面直接打开核对报告或原图页面。

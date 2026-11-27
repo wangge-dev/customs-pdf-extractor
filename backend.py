@@ -49,7 +49,7 @@ def _merge_file(data, relative, ocr_error, combined):
     header = data['headers'][0]
     details = data.get('details', [])
     evidence = data.get('evidence', [])
-    expected = [(None, 1, field, header.get(field)) for field in HEADER_COLUMNS[1:]]
+    expected = [(None, 1, None, field, header.get(field)) for field in HEADER_COLUMNS[1:]]
     if len(details) != len(evidence):
         ocr_error = (ocr_error + '；' if ocr_error else '') + '明细与来源定位数量不一致'
     for index, row in enumerate(details):
@@ -57,19 +57,19 @@ def _merge_file(data, relative, ocr_error, combined):
         page = e.get('页码')
         if e.get('项号') != row.get('项号'):
             ocr_error = (ocr_error + '；' if ocr_error else '') + '明细来源项号不一致'
-        expected.extend((row.get('项号'), page, field, row.get(field)) for field in DETAIL_COLUMNS[1:])
+        expected.extend((row.get('项号'), page, e.get('行位置'), field, row.get(field)) for field in DETAIL_COLUMNS[1:])
 
     records = list(data.get('audit', []))
-    expected_keys = collections.Counter((i, p, f) for i, p, f, _ in expected)
-    actual_keys = collections.Counter((r.get('项号'), r.get('页码'), r.get('字段')) for r in records)
+    expected_keys = collections.Counter((i, p, y, f) for i, p, y, f, _ in expected)
+    actual_keys = collections.Counter((r.get('项号'), r.get('页码'), r.get('行位置'), r.get('字段')) for r in records)
     coverage_bad = expected_keys != actual_keys
     if coverage_bad and not ocr_error:
         ocr_error = '部分字段的图像核对未完成或定位不一致'
     missing = expected_keys - actual_keys
-    for item, page, field, value in expected:
-        key = item, page, field
+    for item, page, position, field, value in expected:
+        key = item, page, position, field
         if missing[key]:
-            records.append({'文件名': relative, '页码': page, '项号': item, '字段': field,
+            records.append({'文件名': relative, '页码': page, '项号': item, '行位置': position, '字段': field,
                             '提取值': value, 'OCR读数': '', 'OCR分数': None,
                             '核对状态': '未核对', '原因': ocr_error or '未收到 OCR 结果',
                             '人工确认值': None, '复核意见': None, '截图': ''})
@@ -89,12 +89,28 @@ def _merge_file(data, relative, ocr_error, combined):
     low_same = sum(r['核对状态'] != '两路一致' for r in matched)
     rule_issues = sum(r.get('状态') != '相符' for r in rules)
     needs_review = bool(different or low_same or rule_issues or coverage_bad or ocr_error or not details)
+    warnings = []
+    if any(i['字段']=='项号列异常' for i in data.get('issues', [])):
+        warnings.append('项号列异常')
+    pending = sorted({i['页码'] for i in data.get('issues', [])
+                      if i.get('页码') and (i['字段'] in ('未提取页面','项号列异常') or
+                        (i['字段']=='整页' and '文字层不足' in i['原因']))})
+    if pending:
+        warnings.append('明细可能不完整，第 '+ '、'.join(map(str,pending))+' 页未确认')
+    partial = sorted({i['页码'] for i in data.get('issues', [])
+                      if i.get('页码') and i.get('项号') is not None
+                      and i['字段'] in DETAIL_COLUMNS[2:]})
+    if partial:
+        warnings.append('第 '+'、'.join(map(str,partial))+' 页有未确认的商品字段')
+    if warnings:
+        warnings.append(f'已导出 {len(details)} 项')
+    needs_review = needs_review or bool(warnings)
     combined['summaries'].append({
         '文件名': relative, '页数': data.get('page_count'), '商品项数': len(details),
         '应核对字段': len(expected), '已核对字段': sum(r.get('OCR分数') is not None and normalize(r['字段'], r.get('OCR读数')) is not None for r in records),
         '读数一致': len(matched), '读数不同或缺失': different, '低分但读数一致': low_same,
         '规则待核对': rule_issues, '文件状态': '待核对' if needs_review else '机器一致，待抽查',
-        'OCR错误': ocr_error,
+        'OCR错误': ocr_error, '完整性说明': '；'.join(warnings),
     })
     # A worker can finish normally while individual crops have no OCR result,
     # or its field coverage does not match the extracted rows.  Those files
@@ -155,7 +171,14 @@ def run_batch(input_dir, output_dir, progress_callback=lambda _: None, workers=N
             '待核对文件数': review, 'OCR未完成文件数': ocr_failures,
             '收发件人表': str(output['headers']), '商品明细表': str(output['details']),
             '核对报告': str(output['report']), '原图核对页': str(output['images'])}
+    for row in combined['summaries']:
+        if row['完整性说明']:
+            progress_callback(f"{row['文件名']}：{row['完整性说明']}")
     progress_callback(f'完成：{count} 份 PDF，{len(combined["details"])} 条明细；{review} 份需要核对。')
     # Usable by operators and by unattended, isolated end-to-end verification.
     (target / '本次运行结果.txt').write_text('\n'.join(f'{k}：{v}' for k, v in info.items()), encoding='utf-8-sig')
+    notes = [f"{row['文件名']}：{row['完整性说明']}" for row in combined['summaries'] if row['完整性说明']]
+    if notes:
+        with (target / '本次运行结果.txt').open('a',encoding='utf-8') as log:
+            log.write('\n'+'\n'.join(notes))
     return info
